@@ -1,0 +1,8 @@
+.env
+.env.*.local
+outputs/
+data/raw/
+data/checkpoints/
+*.log
+.DS_Store
+
