@@ -13,6 +13,7 @@ cli({
   columns: [
     'media_id', 'published_at', 'caption', 'likes', 'comments', 'shares',
     'play_count', 'view_count', 'duration_seconds', 'type', 'url', 'subtitle_url',
+    'profile_lookup_method',
   ],
   pipeline: [
     { navigate: 'https://www.instagram.com' },
@@ -26,9 +27,22 @@ cli({
     'https://www.instagram.com/api/v1/users/web_profile_info/?username=' + encodeURIComponent(username),
     opts
   );
-  if (!profileResponse.ok) throw new Error('Profile HTTP ' + profileResponse.status);
-  const profile = await profileResponse.json();
-  const userId = profile?.data?.user?.id;
+  let userId = '';
+  let profileLookupMethod = 'web_profile_info';
+  if (profileResponse.ok) {
+    const profile = await profileResponse.json();
+    userId = String(profile?.data?.user?.id ?? '');
+  } else {
+    const searchResponse = await fetch(
+      'https://www.instagram.com/web/search/topsearch/?query=' + encodeURIComponent(username) + '&context=user',
+      opts
+    );
+    if (!searchResponse.ok) throw new Error('Profile HTTP ' + profileResponse.status + '; search fallback HTTP ' + searchResponse.status);
+    const search = await searchResponse.json();
+    const exact = (search?.users ?? []).map(item => item?.user).find(user => user?.username === username);
+    userId = String(exact?.pk ?? exact?.id ?? '');
+    profileLookupMethod = 'topsearch_exact_id_fallback';
+  }
   if (!userId) throw new Error('User not found: ' + username);
 
   const rawItems = [];
@@ -79,6 +93,7 @@ cli({
       type: item.product_type ?? (item.media_type === 8 ? 'carousel_video' : 'video'),
       url: code ? 'https://www.instagram.com/p/' + code + '/' : '',
       subtitle_url: Array.isArray(subtitles) ? (subtitles[0]?.subtitle_url ?? subtitles[0]?.url ?? '') : '',
+      profile_lookup_method: profileLookupMethod,
       pagination_complete: complete,
     };
   });
