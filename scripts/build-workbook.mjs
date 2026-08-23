@@ -140,9 +140,14 @@ for (const item of accounts) {
         status: missing.length ? missing.join('；') : '完整',
       });
     }
-    for (const row of historical) {
-      const key = postKey(row.url, `ref:${merged.size}`);
-      if (!merged.has(key)) merged.set(key, row);
+    // The refreshed wellness sheet is a strict real-time snapshot. Historical
+    // attachment rows may enrich matching posts with transcript text, but must
+    // not increase the sheet beyond the 141 posts returned by the live feed.
+    if (item.account !== 'wellness.with.gloria') {
+      for (const row of historical) {
+        const key = postKey(row.url, `ref:${merged.size}`);
+        if (!merged.has(key)) merged.set(key, row);
+      }
     }
     accountRows.set(item.account, [...merged.values()]);
   } else {
@@ -221,7 +226,7 @@ for (let accountIndex = 0; accountIndex < accounts.length; accountIndex += 1) {
   const scopeNote = item.platform === '小红书'
     ? '口径说明：小红书公开详情页可读取点赞、评论、收藏、分享等部分互动指标，但未公开播放量；因此爆款倍率与互动率留空。Transcript 仅在平台提供字幕或完成音轨识别时填写。'
     : item.account === 'wellness.with.gloria'
-      ? '口径说明：该账号当前 Instagram 私有接口拒绝访问，本表使用用户附件中的 100 条历史明细；分享数未提供，互动率按点赞+评论计算。'
+      ? '口径说明：Instagram 已通过账号 ID 回退路径完成 141 条实时视频分页；有效播放量使用 play_count。用户附件仅用于按帖子短码补充匹配 transcript；分享数未公开。'
       : '口径说明：Instagram 有效播放量优先使用 view_count，否则使用 play_count；分享数多数帖子未公开，互动率按可获得的点赞+评论+分享计算。附件中匹配到的历史 transcript 已合并。';
   sheet.getRange('A4').values = [[scopeNote]];
   sheet.getRange('A4:N4').format = { fill: '#FFF8E8', font: { color: '#6B561A', size: 10 }, wrapText: true, verticalAlignment: 'center', borders: { preset: 'outside', style: 'thin', color: '#E7D7A4' } };
@@ -320,7 +325,15 @@ await output.save(outputPath);
 const report = {
   outputPath,
   previews,
-  sheets: accounts.map((item) => ({ account: item.account, platform: item.platform, rows: (accountRows.get(item.account) ?? []).length })),
+  sheets: accounts.map((item) => {
+    const rows = accountRows.get(item.account) ?? [];
+    return {
+      account: item.account,
+      platform: item.platform,
+      rows: rows.length,
+      transcripts: rows.filter((row) => String(row.transcript ?? '').trim()).length,
+    };
+  }),
   errorScan: errorScan.ndjson,
 };
 await fs.writeFile(path.join(previewDir, 'build-report.json'), JSON.stringify(report, null, 2));
