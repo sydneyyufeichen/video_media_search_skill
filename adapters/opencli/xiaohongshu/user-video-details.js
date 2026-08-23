@@ -7,7 +7,22 @@ const SNAPSHOT_JS = `
   const safeClone = (value) => { try { return JSON.parse(JSON.stringify(value ?? null)); } catch { return null; } };
   const user = unwrap(window.__INITIAL_STATE__?.user) || {};
   const notes = unwrap(user.notes) || [];
-  return { notes: safeClone(notes), loggedIn: unwrap(user.loggedIn) !== false, path: location.pathname };
+  const domNotes = [...document.querySelectorAll('a[href*="/user/profile/"]')].map((anchor) => {
+    try {
+      const url = new URL(anchor.href, location.origin);
+      const id = url.pathname.split('/').filter(Boolean).pop() || '';
+      if (!/^[0-9a-f]{24}$/i.test(id)) return null;
+      const image = anchor.querySelector('img');
+      return {
+        id,
+        title: (anchor.getAttribute('title') || image?.getAttribute('alt') || anchor.textContent || '').trim(),
+        type: anchor.querySelector('video, [class*="play"], [class*="video"]') ? 'video' : '',
+        cover_url: image?.currentSrc || image?.src || '',
+        url: url.toString(),
+      };
+    } catch { return null; }
+  }).filter(Boolean);
+  return { notes: safeClone(notes), domNotes, loggedIn: unwrap(user.loggedIn) !== false, path: location.pathname };
 })()`;
 
 const DETAIL_JS = `
@@ -24,7 +39,8 @@ const DETAIL_JS = `
   const stream = media.stream ?? {};
   const h264 = Array.isArray(stream.h264) ? stream.h264 : [];
   const h265 = Array.isArray(stream.h265) ? stream.h265 : [];
-  const streamItem = h264[0] ?? h265[0] ?? {};
+  const streamVariants = Object.values(stream).flatMap((value) => Array.isArray(value) ? value : []);
+  const streamItem = h264[0] ?? h265[0] ?? streamVariants[0] ?? {};
   const domTitle = clean(document.querySelector('#detail-title, .title')?.textContent);
   const domDesc = clean(document.querySelector('#detail-desc, .desc, .note-text')?.textContent);
   const domAuthor = clean(document.querySelector('.username, .author-wrapper .name')?.textContent);
@@ -33,6 +49,10 @@ const DETAIL_JS = `
   const domCollects = clean(main?.querySelector('.collect-wrapper .count')?.textContent);
   const domComments = clean(main?.querySelector('.chat-wrapper .count')?.textContent);
   const domVideo = document.querySelector('video');
+  const resourceMedia = performance.getEntriesByType('resource')
+    .map((entry) => entry.name)
+    .filter((url) => /sns-video|\\.mp4(?:\\?|$)|\\.m3u8(?:\\?|$)/i.test(url))
+    .pop() || '';
   return {
     title: clean(note.title) || domTitle,
     caption: clean(note.desc ?? note.description) || domDesc,
@@ -43,7 +63,8 @@ const DETAIL_JS = `
     shares: interact.shareCount ?? interact.share_count ?? null,
     published_at: note.time ?? note.publishTime ?? note.publish_time ?? null,
     duration_seconds: video.duration ?? media.duration ?? streamItem.duration ?? (Number.isFinite(domVideo?.duration) ? domVideo.duration : null),
-    media_url: streamItem.masterUrl ?? streamItem.master_url ?? streamItem.url ?? domVideo?.currentSrc ?? domVideo?.src ?? '',
+    media_url: streamItem.masterUrl ?? streamItem.master_url ?? streamItem.url ?? resourceMedia ?? domVideo?.currentSrc ?? domVideo?.src ?? '',
+    note_type: clean(note.type ?? note.noteType ?? note.note_type),
     page_url: location.href,
   };
 })`;
@@ -64,13 +85,16 @@ function clean(value) {
 function extractRows(snapshot, userId) {
   const seen = new Set();
   const rows = [];
-  for (const entry of flatten(snapshot?.notes)) {
+  for (const entry of [...flatten(snapshot?.notes), ...(snapshot?.domNotes ?? [])]) {
     const card = entry?.noteCard ?? entry?.note_card ?? entry;
     const id = clean(card?.noteId ?? card?.note_id ?? entry?.id);
     if (!id || seen.has(id)) continue;
     seen.add(id);
     const type = clean(card?.type);
-    const token = clean(entry?.xsecToken ?? entry?.xsec_token ?? card?.xsecToken ?? card?.xsec_token);
+    let token = clean(entry?.xsecToken ?? entry?.xsec_token ?? card?.xsecToken ?? card?.xsec_token);
+    if (!token && entry?.url) {
+      try { token = new URL(entry.url).searchParams.get('xsec_token') ?? ''; } catch { token = ''; }
+    }
     const url = new URL(`https://www.xiaohongshu.com/user/profile/${userId}/${id}`);
     if (token) {
       url.searchParams.set('xsec_token', token);
@@ -81,7 +105,7 @@ function extractRows(snapshot, userId) {
       title: clean(card?.displayTitle ?? card?.display_title ?? card?.title),
       type,
       likes: card?.interactInfo?.likedCount ?? card?.interact_info?.liked_count ?? null,
-      cover_url: clean(card?.cover?.urlDefault ?? card?.cover?.urlPre ?? card?.cover?.url),
+      cover_url: clean(card?.cover?.urlDefault ?? card?.cover?.urlPre ?? card?.cover?.url ?? entry?.cover_url),
       url: url.toString(),
     });
   }
@@ -111,18 +135,23 @@ cli({
     await page.goto(`https://www.xiaohongshu.com/user/profile/${userId}`);
     await page.wait({ time: 2.5 });
     let snapshot = await page.evaluate(SNAPSHOT_JS);
-    let rows = extractRows(snapshot, userId);
+    const collected = new Map(extractRows(snapshot, userId).map((row) => [row.media_id, row]));
     let stable = 0;
-    for (let attempt = 0; attempt < 50 && rows.length < limit && stable < 4; attempt += 1) {
+    for (let attempt = 0; attempt < 200 && collected.size < limit && stable < 12; attempt += 1) {
       await page.autoScroll({ times: 1, delayMs: 1700 });
       await page.wait({ time: 1 });
       snapshot = await page.evaluate(SNAPSHOT_JS);
       if (!snapshot?.loggedIn || String(snapshot?.path || '').startsWith('/login')) throw new Error('Xiaohongshu login required');
       const nextRows = extractRows(snapshot, userId);
-      if (nextRows.length <= rows.length) stable += 1;
-      else { rows = nextRows; stable = 0; }
+      const before = collected.size;
+      for (const row of nextRows) {
+        const previous = collected.get(row.media_id) ?? {};
+        collected.set(row.media_id, { ...previous, ...row });
+      }
+      if (collected.size === before) stable += 1;
+      else stable = 0;
     }
-    rows = rows.filter(row => row.type === 'video').slice(0, limit);
+    const rows = [...collected.values()].slice(0, limit);
     if (!rows.length) throw new EmptyResultError('xiaohongshu user-video-details', 'No public video notes found');
 
     const output = [];
@@ -131,9 +160,10 @@ cli({
         await page.goto(row.url);
         await page.wait({ time: 2.5 });
         const detail = await page.evaluate(`${DETAIL_JS}(${JSON.stringify(row.media_id)})`);
-        output.push({ ...row, ...detail, likes: detail?.likes || row.likes, detail_status: 'complete' });
+        const isVideo = row.type === 'video' || detail?.note_type === 'video' || Boolean(detail?.media_url);
+        if (isVideo) output.push({ ...row, ...detail, likes: detail?.likes ?? row.likes, detail_status: 'complete' });
       } catch (error) {
-        output.push({ ...row, caption: '', comments: null, collects: null, shares: null, duration_seconds: null, media_url: '', detail_status: `failed: ${error?.message ?? error}` });
+        if (row.type === 'video') output.push({ ...row, caption: '', comments: null, collects: null, shares: null, duration_seconds: null, media_url: '', detail_status: `failed: ${error?.message ?? error}` });
       }
     }
     return output;

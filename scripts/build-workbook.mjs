@@ -2,9 +2,16 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { FileBlob, SpreadsheetFile, Workbook } from '@oai/artifact-tool';
 
-const [captureDir, referencePath, outputPath, previewDir = '/tmp/allmedia_excel_previews'] = process.argv.slice(2);
+const [
+  captureDir,
+  referencePath,
+  outputPath,
+  previewDir = '/tmp/allmedia_excel_previews',
+  xhsDetailsDir = captureDir,
+  transcriptDir = '',
+] = process.argv.slice(2);
 if (!captureDir || !referencePath || !outputPath) {
-  throw new Error('Usage: node scripts/build-workbook.mjs <capture-dir> <reference.xlsx> <output.xlsx> [preview-dir]');
+  throw new Error('Usage: node scripts/build-workbook.mjs <capture-dir> <reference.xlsx> <output.xlsx> [preview-dir] [xhs-details-dir] [transcript-dir]');
 }
 
 const accounts = [
@@ -113,6 +120,7 @@ for (const item of accounts) {
   if (item.platform === 'Instagram') {
     const current = await readJson(path.join(captureDir, `instagram_${item.account}.json`));
     const historical = referenceData.get(item.account) ?? [];
+    const asrRows = transcriptDir ? await readJson(path.join(transcriptDir, `instagram_${item.account}.json`)) : {};
     const transcriptByKey = new Map(historical.map((row) => [postKey(row.url), row.transcript]));
     const merged = new Map();
     for (const raw of current) {
@@ -120,7 +128,8 @@ for (const item of accounts) {
       const key = postKey(url, `ig-id:${raw.media_id ?? ''}`);
       const validViews = parseCount(raw.view_count) ?? parseCount(raw.play_count);
       const shares = parseCount(raw.shares);
-      const transcript = transcriptByKey.get(key) ?? '';
+      const shortcode = key.startsWith('ig:') ? key.slice(3) : '';
+      const transcript = String(asrRows?.[shortcode]?.transcript ?? transcriptByKey.get(key) ?? '');
       const missing = [];
       if (shares == null) missing.push('分享数未公开');
       if (!transcript) missing.push('无可用字幕/附件转录');
@@ -133,42 +142,40 @@ for (const item of accounts) {
         comments: parseCount(raw.comments),
         shares,
         validViews,
-        duration: Number(raw.duration_seconds) || null,
+        duration: Number(raw.duration_seconds) || Number(asrRows?.[shortcode]?.duration_seconds) || null,
         url,
         viewBasis: raw.view_count != null ? 'Instagram view_count（当前公开接口）' : raw.play_count != null ? 'Instagram play_count（当前公开接口）' : '',
         source: 'Instagram 当前采集（OpenCLI + Chrome 登录态）',
         status: missing.length ? missing.join('；') : '完整',
       });
     }
-    // The refreshed wellness sheet is a strict real-time snapshot. Historical
-    // attachment rows may enrich matching posts with transcript text, but must
-    // not increase the sheet beyond the 141 posts returned by the live feed.
-    if (item.account !== 'wellness.with.gloria') {
-      for (const row of historical) {
-        const key = postKey(row.url, `ref:${merged.size}`);
-        if (!merged.has(key)) merged.set(key, row);
-      }
-    }
     accountRows.set(item.account, [...merged.values()]);
   } else {
-    const current = await readJson(path.join(captureDir, xhsFileName(item.account)));
-    accountRows.set(item.account, current.map((raw) => {
-      const missing = ['有效播放量未公开，无法计算爆款倍率/互动率', '无公开视频字幕，未做音轨识别'];
+    let current = await readJson(path.join(xhsDetailsDir, xhsFileName(item.account)));
+    if (!current.length) current = await readJson(path.join(xhsDetailsDir, `${Buffer.from(item.account, 'utf8').toString('hex')}.json`));
+    const asrRows = transcriptDir ? await readJson(path.join(transcriptDir, xhsFileName(item.account))) : {};
+    const videos = current.filter((raw) => raw.is_video === true || (raw.is_video == null && raw.type === 'video'));
+    accountRows.set(item.account, videos.map((raw) => {
+      const transcript = String(asrRows?.[raw.media_id]?.transcript ?? '');
+      const missing = ['有效播放量未公开，无法计算爆款倍率/互动率'];
+      if (!transcript) missing.push(asrRows?.[raw.media_id]?.status === 'no_speech' ? '音轨无可识别语音' : '音轨转写未完成');
       if (raw.shares == null || raw.shares === '') missing.push('分享数未公开');
       if (raw.duration_seconds == null || raw.duration_seconds === '') missing.push('时长未公开');
-      if (raw.detail_status && raw.detail_status !== 'complete') missing.push(String(raw.detail_status));
+      if (raw.detail_status && raw.detail_status !== 'complete') {
+        missing.push([raw.detail_status, raw.detail_error].filter(Boolean).join('：'));
+      }
       return {
         publishedAt: parseDate(raw.published_at),
         caption: [raw.title, raw.caption].filter(Boolean).join('\n'),
-        transcript: '',
+        transcript,
         likes: parseCount(raw.likes),
         comments: parseCount(raw.comments),
         shares: parseCount(raw.shares),
         validViews: null,
-        duration: Number(raw.duration_seconds) || null,
+        duration: Number(raw.duration_seconds) || Number(asrRows?.[raw.media_id]?.duration_seconds) || null,
         url: String(raw.page_url || raw.url || ''),
         viewBasis: '小红书公开页面未提供播放量',
-        source: '小红书当前采集（OpenCLI + Chrome 登录态）',
+        source: transcript ? '小红书全量公开页采集 + Whisper 音轨转写' : '小红书全量公开页采集',
         status: missing.join('；'),
       };
     }));
@@ -176,7 +183,7 @@ for (const item of accounts) {
 }
 
 const workbook = Workbook.create();
-const headers = ['发布时间', 'Caption / 帖子文案', 'Transcript', '点赞数', '评论数', '分享数', '有效播放量', '时长（秒）', '爆款倍率', '互动率', '帖子 URL', '播放量口径', '数据来源', '数据状态 / 缺失原因'];
+const headers = ['发布时间', 'Caption / 帖子文案', 'Script / Transcript', '点赞数', '评论数', '分享数', '有效播放量', '时长（秒）', '爆款倍率', '互动率', '帖子 URL', '播放量口径', '数据来源', '数据状态 / 缺失原因'];
 const instagramAccent = '#7C3AED';
 const xhsAccent = '#D93A49';
 const neutralFill = '#F5F7FA';
@@ -205,7 +212,7 @@ for (let accountIndex = 0; accountIndex < accounts.length; accountIndex += 1) {
   sheet.getRange('A1:N1').format.rowHeight = 30;
 
   sheet.getRange('A2:N2').merge();
-  sheet.getRange('A2').values = [[`采集日期：2026-08-23（Asia/Shanghai）｜每个账号独立子表｜爆款倍率 = 有效播放量 ÷ 本账号平均有效播放量｜未知值留空，不以 0 代替`]];
+  sheet.getRange('A2').values = [[`采集日期：2026-08-24（Asia/Shanghai）｜每个账号独立子表｜爆款倍率 = 有效播放量 ÷ 本账号平均有效播放量｜未知值留空，不以 0 代替`]];
   sheet.getRange('A2:N2').format = { fill: '#EEEAFB', font: { color: '#40345A', italic: true, size: 10 }, wrapText: true, verticalAlignment: 'center' };
   sheet.getRange('A2:N2').format.rowHeight = 30;
 
@@ -224,10 +231,10 @@ for (let accountIndex = 0; accountIndex < accounts.length; accountIndex += 1) {
 
   sheet.getRange('A4:N4').merge();
   const scopeNote = item.platform === '小红书'
-    ? '口径说明：小红书公开详情页可读取点赞、评论、收藏、分享等部分互动指标，但未公开播放量；因此爆款倍率与互动率留空。Transcript 仅在平台提供字幕或完成音轨识别时填写。'
+    ? '口径说明：已滚动至账号公开帖子末尾并逐条识别视频；小红书未公开播放量，因此爆款倍率与互动率留空。Transcript 由视频音轨经 Whisper 自动转写。'
     : item.account === 'wellness.with.gloria'
-      ? '口径说明：Instagram 已通过账号 ID 回退路径完成 141 条实时视频分页；有效播放量使用 play_count。用户附件仅用于按帖子短码补充匹配 transcript；分享数未公开。'
-      : '口径说明：Instagram 有效播放量优先使用 view_count，否则使用 play_count；分享数多数帖子未公开，互动率按可获得的点赞+评论+分享计算。附件中匹配到的历史 transcript 已合并。';
+      ? '口径说明：Instagram 已通过账号 ID 回退路径完成 141 条实时视频分页；有效播放量使用 play_count。Transcript 优先复用附件匹配结果，其余由视频音轨自动转写；分享数未公开。'
+      : '口径说明：Instagram 有效播放量优先使用 view_count，否则使用 play_count；分享数多数帖子未公开。Transcript 优先复用附件匹配结果，其余由视频音轨自动转写。';
   sheet.getRange('A4').values = [[scopeNote]];
   sheet.getRange('A4:N4').format = { fill: '#FFF8E8', font: { color: '#6B561A', size: 10 }, wrapText: true, verticalAlignment: 'center', borders: { preset: 'outside', style: 'thin', color: '#E7D7A4' } };
   sheet.getRange('A4:N4').format.rowHeight = 38;
