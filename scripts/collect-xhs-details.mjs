@@ -9,6 +9,8 @@ const allAccounts = JSON.parse(fs.readFileSync(path.join(manifestDir, 'manifest.
 const accountFilter = String(process.env.XHS_ACCOUNT ?? '').trim();
 const accounts = accountFilter ? allAccounts.filter((item) => item.account === accountFilter) : allAccounts;
 const batchSize = Math.max(1, Number(process.env.XHS_DETAIL_BATCH_SIZE ?? 20));
+const siteSession = String(process.env.XHS_SITE_SESSION ?? 'ephemeral').trim();
+const detailCommand = String(process.env.XHS_DETAIL_COMMAND ?? 'note-details-batch').trim();
 const summary = [];
 
 for (const account of accounts) {
@@ -29,8 +31,8 @@ for (const account of accounts) {
     for (let offset = 0; offset < pending.length; offset += batchSize) {
       const batch = pending.slice(offset, offset + batchSize);
       const run = spawnSync('opencli', [
-        'xiaohongshu', 'note-details-batch', JSON.stringify(batch),
-        '-f', 'json', '--window', 'foreground', '--site-session', 'ephemeral',
+        'xiaohongshu', detailCommand, JSON.stringify(batch),
+        '-f', 'json', '--window', 'foreground', '--site-session', siteSession, '--keep-tab', 'false',
       ], {
         encoding: 'utf8',
         timeout: 240_000,

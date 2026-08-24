@@ -14,6 +14,13 @@ if (!captureDir || !referencePath || !outputPath) {
   throw new Error('Usage: node scripts/build-workbook.mjs <capture-dir> <reference.xlsx> <output.xlsx> [preview-dir] [xhs-details-dir] [transcript-dir]');
 }
 
+const excludedAccounts = new Set(
+  String(process.env.EXCLUDE_ACCOUNTS ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean),
+);
+
 const accounts = [
   { platform: '小红书', account: '阿飞泡枸杞', target: '65086f960000000017023c45' },
   { platform: '小红书', account: '欧阳会食养', target: '5e4e14f2000000000100745e' },
@@ -25,7 +32,7 @@ const accounts = [
   { platform: 'Instagram', account: 'tcmbycheehee', target: 'tcmbycheehee' },
   { platform: 'Instagram', account: 'dr.franktcm', target: 'dr.franktcm' },
   { platform: 'Instagram', account: 'yourtcmguide', target: 'yourtcmguide' },
-];
+].filter((item) => !excludedAccounts.has(item.account));
 
 const referenceSheets = new Map([
   ['wellness.with.gloria', 'wellness.with.gloria'],
@@ -62,6 +69,13 @@ function parseDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function normalizeDuration(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  // Some XHS page payloads label millisecond values as duration_seconds.
+  return numeric > 10_000 ? numeric / 1000 : numeric;
+}
+
 function postKey(url, fallback = '') {
   const text = String(url || '');
   const instagram = text.match(/instagram\.com\/(?:p|reel)\/([^/?#]+)/i);
@@ -69,6 +83,14 @@ function postKey(url, fallback = '') {
   const xhs = text.match(/(?:explore|profile\/[^/]+)\/([0-9a-f]{24})/i);
   if (xhs) return `xhs:${xhs[1]}`;
   return text ? text.replace(/[?#].*$/, '').replace(/\/$/, '').toLowerCase() : fallback;
+}
+
+function xhsObjectIdDate(mediaId) {
+  const prefix = String(mediaId ?? '').slice(0, 8);
+  if (!/^[0-9a-f]{8}$/i.test(prefix)) return null;
+  const seconds = Number.parseInt(prefix, 16);
+  const date = new Date(seconds * 1000);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function normalizeReferenceRows(values) {
@@ -132,7 +154,7 @@ for (const item of accounts) {
       const transcript = String(asrRows?.[shortcode]?.transcript ?? transcriptByKey.get(key) ?? '');
       const missing = [];
       if (shares == null) missing.push('分享数未公开');
-      if (!transcript) missing.push('无可用字幕/附件转录');
+      if (!transcript) missing.push(asrRows?.[shortcode]?.status === 'failed' ? '媒体不可访问，无法生成 Script' : '无可用字幕/附件转录');
       if (validViews == null) missing.push('有效播放量未公开');
       merged.set(key, {
         publishedAt: parseDate(raw.published_at),
@@ -142,7 +164,7 @@ for (const item of accounts) {
         comments: parseCount(raw.comments),
         shares,
         validViews,
-        duration: Number(raw.duration_seconds) || Number(asrRows?.[shortcode]?.duration_seconds) || null,
+        duration: normalizeDuration(raw.duration_seconds) ?? normalizeDuration(asrRows?.[shortcode]?.duration_seconds),
         url,
         viewBasis: raw.view_count != null ? 'Instagram view_count（当前公开接口）' : raw.play_count != null ? 'Instagram play_count（当前公开接口）' : '',
         source: 'Instagram 当前采集（OpenCLI + Chrome 登录态）',
@@ -158,21 +180,24 @@ for (const item of accounts) {
     accountRows.set(item.account, videos.map((raw) => {
       const transcript = String(asrRows?.[raw.media_id]?.transcript ?? '');
       const missing = ['有效播放量未公开，无法计算爆款倍率/互动率'];
+      const publishedAt = parseDate(raw.published_at) ?? xhsObjectIdDate(raw.media_id);
+      if (!parseDate(raw.published_at) && publishedAt) missing.push('发布时间由帖子 ID 时间戳估算');
       if (!transcript) missing.push(asrRows?.[raw.media_id]?.status === 'no_speech' ? '音轨无可识别语音' : '音轨转写未完成');
       if (raw.shares == null || raw.shares === '') missing.push('分享数未公开');
       if (raw.duration_seconds == null || raw.duration_seconds === '') missing.push('时长未公开');
       if (raw.detail_status && raw.detail_status !== 'complete') {
         missing.push([raw.detail_status, raw.detail_error].filter(Boolean).join('：'));
       }
+      if (!raw.detail_status) missing.push('单帖详情受平台安全限制，仅保留主页公开字段');
       return {
-        publishedAt: parseDate(raw.published_at),
+        publishedAt,
         caption: [raw.title, raw.caption].filter(Boolean).join('\n'),
         transcript,
         likes: parseCount(raw.likes),
         comments: parseCount(raw.comments),
         shares: parseCount(raw.shares),
         validViews: null,
-        duration: Number(raw.duration_seconds) || Number(asrRows?.[raw.media_id]?.duration_seconds) || null,
+        duration: normalizeDuration(raw.duration_seconds) ?? normalizeDuration(asrRows?.[raw.media_id]?.duration_seconds),
         url: String(raw.page_url || raw.url || ''),
         viewBasis: '小红书公开页面未提供播放量',
         source: transcript ? '小红书全量公开页采集 + Whisper 音轨转写' : '小红书全量公开页采集',

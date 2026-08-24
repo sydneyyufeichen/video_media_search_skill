@@ -14,6 +14,7 @@ const allAccounts = [
   { account: '袁姐姐全息健康笔记', target: '65ddc0f60000000005008e49' },
 ];
 const accountFilter = String(process.env.XHS_ACCOUNT ?? '').trim();
+const siteSession = String(process.env.XHS_SITE_SESSION ?? 'ephemeral').trim();
 const accounts = accountFilter ? allAccounts.filter((item) => item.account === accountFilter) : allAccounts;
 
 const results = [];
@@ -24,7 +25,7 @@ for (const item of accounts) {
   const run = spawnSync('opencli', [
     'xiaohongshu', 'user-all-notes', item.target,
     '--limit', '5000', '-f', 'json',
-    '--window', 'foreground', '--site-session', 'ephemeral',
+    '--window', 'foreground', '--site-session', siteSession, '--keep-tab', 'false',
   ], {
     encoding: 'utf8',
     timeout: 600_000,

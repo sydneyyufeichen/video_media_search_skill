@@ -60,6 +60,7 @@ function extractRows(snapshot, userId) {
       title: clean(card?.displayTitle ?? card?.display_title ?? card?.title ?? entry?.title),
       type: clean(card?.type ?? entry?.type),
       likes: card?.interactInfo?.likedCount ?? card?.interact_info?.liked_count ?? null,
+      published_at: card?.time ?? card?.publishTime ?? card?.publish_time ?? null,
       cover_url: clean(card?.cover?.urlDefault ?? card?.cover?.urlPre ?? card?.cover?.url ?? entry?.cover_url),
       url: url.toString(),
     });
@@ -80,7 +81,7 @@ cli({
     { name: 'id', required: true, positional: true, help: 'Xiaohongshu user id' },
     { name: 'limit', type: 'int', default: 5000, help: 'Maximum notes' },
   ],
-  columns: ['media_id', 'title', 'type', 'likes', 'url', 'cover_url'],
+  columns: ['media_id', 'published_at', 'title', 'type', 'likes', 'url', 'cover_url'],
   func: async (page, kwargs) => {
     const userId = clean(kwargs.id).replace(/[?#].*$/, '').replace(/\/+$/, '').split('/').pop();
     const limit = Math.max(1, Number(kwargs.limit ?? 5000));
