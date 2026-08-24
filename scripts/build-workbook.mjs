@@ -154,7 +154,14 @@ for (const item of accounts) {
       const transcript = String(asrRows?.[shortcode]?.transcript ?? transcriptByKey.get(key) ?? '');
       const missing = [];
       if (shares == null) missing.push('分享数未公开');
-      if (!transcript) missing.push(asrRows?.[shortcode]?.status === 'failed' ? '媒体不可访问，无法生成 Script' : '无可用字幕/附件转录');
+      if (!transcript) {
+        const asrStatus = asrRows?.[shortcode]?.status;
+        const asrError = String(asrRows?.[shortcode]?.error ?? '');
+        if (asrStatus === 'no_speech') missing.push('媒体无音轨或无可识别语音，无可生成的语音 Script');
+        else if (/isn't available to everyone|certain audiences/i.test(asrError)) missing.push('帖子受年龄/地区/受众限制，当前账号不可访问');
+        else if (asrStatus === 'failed') missing.push('媒体不可访问，无法生成 Script');
+        else missing.push('无可用字幕/附件转录');
+      }
       if (validViews == null) missing.push('有效播放量未公开');
       merged.set(key, {
         publishedAt: parseDate(raw.published_at),

@@ -127,7 +127,18 @@ def transcribe_instagram(args):
             try:
                 with tempfile.TemporaryDirectory(prefix="allmedia_ig_") as temporary:
                     media_files = download_instagram(row.get("url", ""), args.instagram_cookie_file, args.yt_dlp, temporary)
-                    parts = [transcribe_file(media, args.model, timeout_seconds=args.transcribe_timeout) for media in media_files]
+                    parts = []
+                    media_errors = []
+                    for media in media_files:
+                        try:
+                            parts.append(transcribe_file(media, args.model, timeout_seconds=args.transcribe_timeout))
+                        except Exception as error:
+                            message = str(error)
+                            if "does not contain any stream" in message or "Failed to load audio" in message:
+                                continue
+                            media_errors.append(message)
+                    if not parts and media_errors:
+                        raise RuntimeError(" | ".join(media_errors)[-1000:])
                     result = {
                         "transcript": "\n\n".join(part["transcript"] for part in parts if part.get("transcript")),
                         "language": next((part.get("language", "") for part in parts if part.get("language")), ""),
