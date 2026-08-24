@@ -158,6 +158,8 @@ def transcribe_xhs(args):
             continue
         slug = name.encode("utf-8").hex()
         rows = read_json(Path(args.xhs_details_dir) / f"{slug}.json", [])
+        if not rows:
+            rows = read_json(Path(args.xhs_details_dir) / f"xiaohongshu_{slug}.json", [])
         rows = [
             row for row in rows
             if row.get("detail_status") == "complete"

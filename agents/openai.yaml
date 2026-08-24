@@ -1,0 +1,4 @@
+interface:
+  display_name: "全媒体视频增量更新"
+  short_description: "增量抓取小红书和 Instagram 新视频并原样追加到现有分析表"
+  default_prompt: "Use $allmedia-incremental-update to fetch newly published account videos and append them to the existing workbook without changing historical rows or styling."
