@@ -6,7 +6,7 @@ if (!captureDir || !transcriptDir || !outputPath) {
   throw new Error('Usage: node scripts/prepare-incremental-rows.mjs <capture-dir> <transcript-dir> <rows.json>');
 }
 
-const accounts = [
+const defaultAccounts = [
   { platform: 'xiaohongshu', account: '阿飞泡枸杞' },
   { platform: 'xiaohongshu', account: '欧阳会食养' },
   { platform: 'xiaohongshu', account: '小七养生说' },
@@ -17,6 +17,22 @@ const accounts = [
   { platform: 'instagram', account: 'dr.franktcm' },
   { platform: 'instagram', account: 'yourtcmguide' },
 ];
+const envXhs = String(process.env.XHS_ACCOUNTS_JSON ?? '').trim();
+const xhsAccounts = envXhs
+  ? JSON.parse(envXhs).map((item) => ({
+      platform: 'xiaohongshu',
+      account: typeof item === 'string' ? item : item.account,
+    }))
+  : defaultAccounts.filter((item) => item.platform === 'xiaohongshu');
+const accounts = [...xhsAccounts, ...defaultAccounts.filter((item) => item.platform === 'instagram')];
+
+async function readJsonFirst(dir, names, fallback) {
+  for (const name of names) {
+    const value = await readJson(path.join(dir, name), fallback);
+    if (Array.isArray(value) && value.length) return value;
+  }
+  return fallback;
+}
 
 async function readJson(filePath, fallback) {
   try { return JSON.parse(await fs.readFile(filePath, 'utf8')); } catch { return fallback; }
@@ -45,28 +61,54 @@ function duration(value) {
 function xhsDate(mediaId) {
   const prefix = String(mediaId ?? '').slice(0, 8);
   if (!/^[0-9a-f]{8}$/i.test(prefix)) return '';
-  return new Date(Number.parseInt(prefix, 16) * 1000).toISOString();
+  return formatXhsTime(Number.parseInt(prefix, 16) * 1000);
+}
+
+function formatXhsTime(value) {
+  if (value == null || value === '') return '';
+  if (typeof value === 'number') {
+    return new Date(value).toISOString().replace('T', ' ').slice(0, 19);
+  }
+  const text = String(value).trim();
+  if (/^\d{10,}$/.test(text)) {
+    return new Date(Number(text)).toISOString().replace('T', ' ').slice(0, 19);
+  }
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)) return text;
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? text : date.toISOString().replace('T', ' ').slice(0, 19);
+}
+
+function xhsCaption(row) {
+  const rawTitle = String(row.title ?? '');
+  const rawCaption = String(row.caption ?? '');
+  if (!rawCaption) return rawTitle;
+  if (rawTitle && rawCaption.includes(rawTitle)) return rawCaption;
+  return [rawTitle, rawCaption].filter(Boolean).join('\n');
 }
 
 const output = { generated_at: new Date().toISOString(), accounts: {} };
 const failures = [];
 for (const item of accounts) {
   const slug = item.platform === 'instagram' ? item.account : Buffer.from(item.account, 'utf8').toString('hex');
-  const rows = await readJson(path.join(captureDir, `${item.platform}_${slug}.json`), []);
+  const captureNames = item.platform === 'instagram'
+    ? [`${item.platform}_${slug}.json`]
+    : [`${slug}.json`, `${item.platform}_${slug}.json`];
+  const rows = await readJsonFirst(captureDir, captureNames, []);
   const transcripts = await readJson(path.join(transcriptDir, `${item.platform}_${slug}.json`), {});
   output.accounts[item.account] = rows.map((row) => {
     const key = item.platform === 'instagram' ? shortcode(row.url) || String(row.media_id ?? '') : String(row.media_id ?? '');
     const transcript = transcripts[key] ?? {};
-    let script = String(transcript.transcript ?? '').trim();
+    const isVideo = item.platform === 'instagram' || row.is_video === true || row.is_video === 'true' || String(row.type ?? '') === 'video';
+    let script = String(transcript.script ?? transcript.transcript ?? '').trim();
     if (!script && transcript.status === 'no_speech') script = '【无可识别语音】';
-    if (!script) failures.push({ account: item.account, media_id: key, status: transcript.status ?? 'missing', error: transcript.error ?? '' });
+    if (!script && isVideo) failures.push({ account: item.account, media_id: key, status: transcript.status ?? 'missing', error: transcript.error ?? '' });
     if (item.platform === 'xiaohongshu') {
       return {
         account: item.account,
         platform: item.platform,
         media_id: row.media_id,
-        published_at: row.published_at || xhsDate(row.media_id),
-        caption: [row.title, row.caption].filter(Boolean).join('\n'),
+        published_at: formatXhsTime(row.published_at) || xhsDate(row.media_id),
+        caption: xhsCaption(row),
         script,
         likes: numberOrNull(row.likes),
         comments: numberOrNull(row.comments),

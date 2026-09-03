@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const [statePath, outputDir = '/tmp/allmedia_incremental_capture'] = process.argv.slice(2);
+const [statePath, outputDir = '/tmp/video_media_search_incremental_capture'] = process.argv.slice(2);
 if (!statePath) throw new Error('Usage: node scripts/collect-incremental.mjs <state.json> [output-dir]');
 fs.mkdirSync(outputDir, { recursive: true });
 
@@ -46,11 +46,13 @@ function saveDiagnostic(account, suffix, value) {
   fs.writeFileSync(path.join(outputDir, `${safe}.${suffix}`), value || '');
 }
 
-const doctor = spawnSync('agent-reach', ['doctor', '--json'], { encoding: 'utf8', timeout: 120_000 });
-if (doctor.status !== 0) {
-  throw new Error(`agent-reach doctor failed: ${(doctor.stderr || doctor.stdout || '').trim().slice(-800)}`);
+const accessCheck = spawnSync(process.execPath, [
+  path.resolve('scripts/verify-platform-access.mjs'), 'xiaohongshu', 'instagram',
+], { encoding: 'utf8', timeout: 300_000 });
+if (accessCheck.status !== 0) {
+  throw new Error(`platform access check failed: ${(accessCheck.stderr || accessCheck.stdout || '').trim().slice(-1600)}`);
 }
-fs.writeFileSync(path.join(outputDir, 'agent-reach-doctor.json'), doctor.stdout);
+fs.writeFileSync(path.join(outputDir, 'platform-access.json'), accessCheck.stdout);
 
 const report = [];
 for (const item of accounts) {

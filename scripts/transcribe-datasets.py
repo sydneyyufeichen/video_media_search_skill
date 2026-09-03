@@ -1,20 +1,39 @@
 #!/usr/bin/env python3
 import argparse
+import importlib.util
 import json
 import os
 import re
 import shutil
-import signal
 import subprocess
 import tempfile
 from pathlib import Path
 
 import requests
-from mlx_whisper import transcribe
+
+
+def load_qwen_pipeline():
+    path = Path(__file__).with_name("transcribe-xhs-dashscope.py")
+    spec = importlib.util.spec_from_file_location("video_media_search_qwen3_asr", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load Qwen ASR pipeline: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+QWEN_PIPELINE = load_qwen_pipeline()
 
 
 IG_ACCOUNTS = ["wellness.with.gloria", "tcmbycheehee", "dr.franktcm", "yourtcmguide"]
-XHS_ACCOUNTS = ["阿飞泡枸杞", "欧阳会食养", "小七养生说", "肖食儿", "养生小禾", "袁姐姐全息健康笔记"]
+XHS_ACCOUNTS = [
+    "阿飞泡枸杞", "欧阳会食养", "肖食儿", "养生小禾",
+    "JIN聊养生", "是小琼啊", "艾先生讲思路", "袁姐姐全息健康笔记",
+]
+XHS_ACCOUNTS_OVERRIDE = os.environ.get("XHS_ACCOUNTS_JSON", "").strip()
+if XHS_ACCOUNTS_OVERRIDE:
+    parsed = json.loads(XHS_ACCOUNTS_OVERRIDE)
+    XHS_ACCOUNTS = [item if isinstance(item, str) else item["account"] for item in parsed]
 
 
 def read_json(path, fallback):
@@ -37,30 +56,43 @@ def shortcode(url):
     return match.group(1) if match else ""
 
 
-def transcribe_file(media_path, model, language=None, timeout_seconds=180, initial_prompt=None):
-    def handle_timeout(_signum, _frame):
-        raise TimeoutError(f"transcription timed out after {timeout_seconds}s")
-
-    previous_handler = signal.signal(signal.SIGALRM, handle_timeout)
-    signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
-    try:
-        result = transcribe(
-            str(media_path),
-            path_or_hf_repo=model,
-            verbose=None,
-            language=language,
-            initial_prompt=initial_prompt,
-            temperature=0,
-            condition_on_previous_text=True,
+def transcribe_file(media_path, model, language=None, timeout_seconds=3600, initial_prompt=None):
+    del language, timeout_seconds, initial_prompt
+    with tempfile.TemporaryDirectory(prefix="video_media_search_qwen_audio_") as temporary:
+        wav = Path(temporary) / "audio.wav"
+        ffmpeg = QWEN_PIPELINE.find_ffmpeg()
+        QWEN_PIPELINE.extract_wav(ffmpeg, str(media_path), str(wav))
+        first_pass, detected_language = QWEN_PIPELINE.transcribe_local(
+            str(wav), model, QWEN_PIPELINE.DOMAIN_TERMS
         )
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous_handler)
-    return {
-        "transcript": str(result.get("text", "")).strip(),
-        "language": result.get("language", language or ""),
-        "duration_seconds": max((segment.get("end", 0) for segment in result.get("segments", [])), default=0),
-    }
+        if not first_pass:
+            return {
+                "first_pass_transcript": "",
+                "transcript": "",
+                "script": "",
+                "language": detected_language,
+                "duration_seconds": 0,
+                "first_pass_model": model,
+                "refinement_model": QWEN_PIPELINE.REFINE_ASR_MODEL,
+            }
+        final_text = QWEN_PIPELINE.transcribe_flash(
+            QWEN_PIPELINE.get_api_key(),
+            str(wav),
+            first_pass,
+            QWEN_PIPELINE.DOMAIN_TERMS,
+            ffmpeg=ffmpeg,
+        ).strip()
+        if not final_text:
+            raise RuntimeError("qwen3-asr-flash returned an empty second-pass transcript")
+        return {
+            "first_pass_transcript": first_pass,
+            "transcript": first_pass,
+            "script": final_text,
+            "language": detected_language,
+            "duration_seconds": 0,
+            "first_pass_model": model,
+            "refinement_model": QWEN_PIPELINE.REFINE_ASR_MODEL,
+        }
 
 
 def download_instagram(url, cookie_file, yt_dlp, target_dir):
@@ -125,7 +157,7 @@ def transcribe_instagram(args):
             if output.get(key, {}).get("status") in ("complete", "no_speech"):
                 continue
             try:
-                with tempfile.TemporaryDirectory(prefix="allmedia_ig_") as temporary:
+                with tempfile.TemporaryDirectory(prefix="video_media_search_ig_") as temporary:
                     media_files = download_instagram(row.get("url", ""), args.instagram_cookie_file, args.yt_dlp, temporary)
                     parts = []
                     media_errors = []
@@ -145,7 +177,7 @@ def transcribe_instagram(args):
                         "duration_seconds": sum(part.get("duration_seconds", 0) or 0 for part in parts),
                     }
                 status = "complete" if result.get("transcript") else "no_speech"
-                output[key] = {**result, "status": status, "source": "whisper_asr", "url": row.get("url", "")}
+                output[key] = {**result, "status": status, "source": "qwen3_asr_two_pass", "url": row.get("url", "")}
             except Exception as error:
                 output[key] = {"transcript": "", "status": "failed", "error": str(error), "url": row.get("url", "")}
             save_json(output_path, output)
@@ -153,6 +185,7 @@ def transcribe_instagram(args):
 
 
 def transcribe_xhs(args):
+    seeds = read_json(args.xhs_reference_transcripts, {})
     for name in XHS_ACCOUNTS:
         if args.account and name != args.account:
             continue
@@ -173,15 +206,24 @@ def transcribe_xhs(args):
             key = str(row.get("media_id", ""))
             if not key or output.get(key, {}).get("status") in ("complete", "no_speech"):
                 continue
+            seed = seeds.get(name, {}).get(key, "")
+            if seed:
+                output[key] = {
+                    "transcript": seed, "language": "", "status": "complete",
+                    "source": "reference_corpus", "url": row.get("url", ""),
+                }
+                save_json(output_path, output)
+                print(f"XHS {name} {index}/{len(rows)} status=complete source=reference_corpus", flush=True)
+                continue
             try:
-                with tempfile.TemporaryDirectory(prefix="allmedia_xhs_") as temporary:
+                with tempfile.TemporaryDirectory(prefix="video_media_search_xhs_") as temporary:
                     media = download_xhs(row.get("media_urls") or row.get("media_url", ""), temporary)
                     result = transcribe_file(
                         media, args.model, language="zh", timeout_seconds=args.transcribe_timeout,
                         initial_prompt="以下是中医、食养、健康科普类视频，请准确转写节气、穴位、中药材、方剂和养生术语。",
                     )
                 status = "complete" if result.get("transcript") else "no_speech"
-                output[key] = {**result, "status": status, "source": "whisper_asr", "url": row.get("url", "")}
+                output[key] = {**result, "status": status, "source": "qwen3_asr_two_pass", "url": row.get("url", "")}
             except Exception as error:
                 output[key] = {"transcript": "", "status": "failed", "error": str(error), "url": row.get("url", "")}
             save_json(output_path, output)
@@ -192,13 +234,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--platform", choices=["instagram", "xiaohongshu", "all"], default="all")
     parser.add_argument("--account", default="")
-    parser.add_argument("--instagram-capture-dir", default="/tmp/allmedia_full_capture_20260823")
-    parser.add_argument("--instagram-cookie-file", default="/tmp/allmedia_instagram.cookies.txt")
-    parser.add_argument("--reference-transcripts", default="/tmp/allmedia_reference_transcripts.json")
-    parser.add_argument("--xhs-details-dir", default="/tmp/allmedia_xhs_ytdlp_20260824")
-    parser.add_argument("--output-dir", default="/tmp/allmedia_transcripts_20260823")
-    parser.add_argument("--model", default="mlx-community/whisper-large-v3-turbo")
-    parser.add_argument("--transcribe-timeout", type=int, default=180)
+    parser.add_argument("--instagram-capture-dir", default="/tmp/video_media_search_full_capture_20260823")
+    parser.add_argument("--instagram-cookie-file", default="/tmp/video_media_search_instagram.cookies.txt")
+    parser.add_argument("--reference-transcripts", default="/tmp/video_media_search_reference_transcripts.json")
+    parser.add_argument("--xhs-details-dir", default="/tmp/video_media_search_xhs_ytdlp_20260824")
+    parser.add_argument("--xhs-reference-transcripts", default="")
+    parser.add_argument("--output-dir", default="/tmp/video_media_search_transcripts_20260823")
+    parser.add_argument("--model", default=QWEN_PIPELINE.LOCAL_ASR_MODEL)
+    parser.add_argument("--transcribe-timeout", type=int, default=3600)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--yt-dlp", default=shutil.which("yt-dlp") or "yt-dlp")
     args = parser.parse_args()

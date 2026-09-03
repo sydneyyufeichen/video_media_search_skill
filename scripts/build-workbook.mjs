@@ -6,7 +6,7 @@ const [
   captureDir,
   referencePath,
   outputPath,
-  previewDir = '/tmp/allmedia_excel_previews',
+  previewDir = '/tmp/video_media_search_excel_previews',
   xhsDetailsDir = captureDir,
   transcriptDir = '',
 ] = process.argv.slice(2);

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const outputDir = process.argv[2] || '/tmp/allmedia_full_capture';
+const outputDir = process.argv[2] || '/tmp/video_media_search_full_capture';
 fs.mkdirSync(outputDir, { recursive: true });
 
 const accounts = [

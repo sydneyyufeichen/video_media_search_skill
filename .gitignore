@@ -1,7 +1,12 @@
 .env
+.env.bak*
 .env.*.local
 node_modules/
 outputs/
+output/
+work/
+__pycache__/
+*.py[cod]
 data/raw/
 data/checkpoints/
 runs/

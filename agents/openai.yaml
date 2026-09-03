@@ -1,4 +1,4 @@
 interface:
-  display_name: "全媒体视频增量更新"
-  short_description: "增量抓取小红书和 Instagram 新视频并原样追加到现有分析表"
-  default_prompt: "Use $allmedia-incremental-update to fetch newly published account videos and append them to the existing workbook without changing historical rows or styling."
+  display_name: "video_media_search_skill"
+  short_description: "抓取小红书与 Instagram 内容并生成 Markdown 记录"
+  default_prompt: "Use $video-media-search-skill to collect the requested Xiaohongshu or Instagram content as Markdown records."

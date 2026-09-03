@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const [manifestDir = '/tmp/allmedia_xhs_manifests', outputDir = '/tmp/allmedia_xhs_details'] = process.argv.slice(2);
+const [manifestDir = '/tmp/video_media_search_xhs_manifests', outputDir = '/tmp/video_media_search_xhs_details'] = process.argv.slice(2);
 fs.mkdirSync(outputDir, { recursive: true });
 
 const allAccounts = JSON.parse(fs.readFileSync(path.join(manifestDir, 'manifest.json'), 'utf8'));

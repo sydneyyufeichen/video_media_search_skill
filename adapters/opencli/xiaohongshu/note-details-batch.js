@@ -5,6 +5,7 @@ const DETAIL_JS = `
 ((noteId) => {
   const unwrap = (value) => value && typeof value === 'object' && '_value' in value ? value._value : value;
   const clean = (value) => value == null ? '' : String(value).replace(/\\s+/g, ' ').trim();
+  const cleanMultiline = (value) => value == null ? '' : String(value).replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n').trim();
   const stateNote = unwrap(window.__INITIAL_STATE__?.note) || {};
   const detailMap = unwrap(stateNote.noteDetailMap) || {};
   const entry = unwrap(detailMap[noteId]) || {};
@@ -26,7 +27,7 @@ const DETAIL_JS = `
   const main = document.querySelector('.interact-container');
   return {
     title: clean(note.title) || domTitle,
-    caption: clean(note.desc ?? note.description) || domDesc,
+    caption: cleanMultiline(note.desc ?? note.description) || domDesc,
     author: clean(note.user?.nickname ?? note.user?.nickName),
     likes: interact.likedCount ?? interact.liked_count ?? clean(main?.querySelector('.like-wrapper .count')?.textContent),
     collects: interact.collectedCount ?? interact.collected_count ?? clean(main?.querySelector('.collect-wrapper .count')?.textContent),
@@ -68,7 +69,10 @@ cli({
     await page.wait({ time: 1 });
     return page.evaluate(`(async () => {
       const items = ${JSON.stringify(items.slice(0, 40))};
+      const delayMs = 2000;
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const clean = (value) => value == null ? '' : String(value).replace(/\\s+/g, ' ').trim();
+      const cleanMultiline = (value) => value == null ? '' : String(value).replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n').trim();
       const normalizeState = (text) => {
         let output = '', inString = false, escaped = false;
         for (let index = 0; index < text.length; index += 1) {
@@ -96,6 +100,9 @@ cli({
           const response = await fetch(requestUrl.toString(), { credentials: 'include' });
           if (!response.ok) throw new Error('HTTP ' + response.status);
           const html = await response.text();
+          const riskText = ['访问频繁', '操作频繁', '验证码', '安全验证']
+            .find((marker) => html.includes(marker));
+          if (riskText) throw new Error('risk control: ' + riskText);
           const marker = html.indexOf('__INITIAL_STATE__');
           const start = html.indexOf('=', marker) + 1;
           const end = html.indexOf('</script>', start);
@@ -103,7 +110,7 @@ cli({
           const state = JSON.parse(normalizeState(html.slice(start, end).trim()));
           const entry = state?.note?.noteDetailMap?.[mediaId] || {};
           const note = entry.note || entry.noteData || entry.data || entry;
-          if (!note || !Object.keys(note).length) throw new Error('note detail missing (possible risk control)');
+          if (!note || !Object.keys(note).length) throw new Error('note detail missing');
           const interact = note.interactInfo || note.interact_info || {};
           const video = note.video || {};
           const media = video.media || {};
@@ -118,7 +125,7 @@ cli({
             ...item,
             media_id: mediaId,
             title: clean(note.title) || clean(item.title),
-            caption: clean(note.desc || note.description),
+            caption: cleanMultiline(note.desc || note.description),
             author: clean(note.user?.nickname || note.user?.nickName),
             likes: interact.likedCount ?? interact.liked_count ?? item.likes ?? null,
             collects: interact.collectedCount ?? interact.collected_count ?? null,
@@ -138,14 +145,10 @@ cli({
         }
       };
       const results = new Array(items.length);
-      let cursor = 0;
-      const worker = async () => {
-        while (cursor < items.length) {
-          const index = cursor++;
-          results[index] = await readOne(items[index]);
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(3, items.length) }, () => worker()));
+      for (let index = 0; index < items.length; index += 1) {
+        results[index] = await readOne(items[index]);
+        if (index + 1 < items.length) await wait(delayMs);
+      }
       return results;
     })()`);
   },

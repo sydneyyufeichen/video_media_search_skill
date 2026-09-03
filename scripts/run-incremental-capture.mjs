@@ -7,7 +7,7 @@ if (!workbookPath) {
   throw new Error('Usage: node scripts/run-incremental-capture.mjs <existing.xlsx> [run-dir]');
 }
 
-const runDir = path.resolve(requestedRunDir || `/tmp/allmedia_incremental_${Date.now()}`);
+const runDir = path.resolve(requestedRunDir || `/tmp/video_media_search_incremental_${Date.now()}`);
 const captureDir = path.join(runDir, 'capture');
 const transcriptDir = path.join(runDir, 'transcripts');
 const statePath = path.join(runDir, 'state.json');
@@ -15,7 +15,7 @@ const rowsPath = path.join(runDir, 'rows.json');
 const instagramCookieFile = path.join(runDir, 'instagram.cookies.txt');
 fs.mkdirSync(runDir, { recursive: true });
 
-const python = process.env.ALLMEDIA_PYTHON || 'python3';
+const python = process.env.VIDEO_MEDIA_SEARCH_PYTHON || 'python3';
 const node = process.execPath;
 
 function run(label, command, args, options = {}) {

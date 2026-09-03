@@ -6,24 +6,28 @@ Xiaohongshu:
 
 - 阿飞泡枸杞 — `65086f960000000017023c45`
 - 欧阳会食养 — `5e4e14f2000000000100745e`
-- 小七养生说 — `65853f56000000001d001fb8`
 - 肖食儿 — `6513f54a00000000230244b0`
 - 养生小禾 — `65afb335000000000e001062`
+- 袁姐姐全息健康笔记 — `65ddc0f60000000005008e49`
+- 是小琼啊 — `5a1075134eacab60b17c74b1`
+- 艾先生讲思路 — `5f3a20220000000001002380`
+- JIN聊养生 — `61d16bdb0000000010006f59`
 
 Instagram: `tcmbycheehee`, `wellness.with.gloria`, `dr.franktcm`, `yourtcmguide`.
 
+
 ## Fast path
 
-1. Extract all known media IDs and each account's latest timestamp from the workbook with `scripts/extract-incremental-state.py`.
+1. Scan `output/**/*.md` for canonical media IDs/URLs and each account's latest timestamp. Use a legacy workbook only when converting an older dataset.
 2. Fetch only the newest 60 posts per account.
 3. If no known ID overlaps, double the window until overlap or 500 posts. If 500 still has no overlap, stop and use the full-backfill scripts.
 4. Filter known IDs before XHS detail requests, media downloads, or transcription.
 5. Fetch XHS detail batches only for unseen notes, then keep only confirmed video rows.
-6. Transcribe only unseen videos. Prefer an existing matching transcript when available; otherwise use platform subtitles when present, then Whisper ASR.
+6. Transcribe only unseen videos. For the current six-account backfill, run `Qwen/Qwen3-ASR-1.7B` once on a CUDA cloud worker and use that transcript as the final Script. Do not invoke `qwen3-asr-flash`.
 7. Normalize to `rows.json`, grouped by account, and enforce nonblank Script.
-8. Dedupe against the workbook again just before append.
+8. Dedupe against the Markdown corpus again just before writing. Run `scripts/export-to-markdown.py rows ...` and validate the completed directory.
 
-This changes the recurring workload from “all historical videos” to “recent discovery + new-video details/ASR.”
+This changes the recurring workload from “all historical videos” to “recent discovery + new-video details/ASR + one Markdown file per new post.”
 
 ## Canonical IDs
 
