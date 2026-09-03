@@ -6,14 +6,18 @@ The script streams each signed media URL through ffmpeg, keeps only a temporary
 It intentionally has no DashScope or qwen3-asr-flash dependency.
 """
 import argparse
+import gc
 import json
 import os
 import shutil
 import subprocess
 import tempfile
+import wave
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 MODEL_ID = "Qwen/Qwen3-ASR-1.7B"
 DEFAULT_ACCOUNTS = (
@@ -113,15 +117,70 @@ def infer(model, paths, context):
     ]
 
 
+def clear_cuda_cache():
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
+def split_wav(path, output_dir, segment_seconds=30):
+    paths = []
+    with wave.open(str(path), "rb") as source:
+        params = source.getparams()
+        frames_per_segment = max(1, params.framerate * segment_seconds)
+        index = 0
+        while True:
+            frames = source.readframes(frames_per_segment)
+            if not frames:
+                break
+            target = Path(output_dir) / f"{Path(path).stem}.segment-{index:04d}.wav"
+            with wave.open(str(target), "wb") as sink:
+                sink.setparams(params)
+                sink.writeframes(frames)
+            paths.append(str(target))
+            index += 1
+    return paths
+
+
+def infer_one_resilient(model, row, audio_path, context):
+    clear_cuda_cache()
+    try:
+        return row, infer(model, [audio_path], context)[0]
+    except RuntimeError as error:
+        if "out of memory" not in str(error).lower():
+            raise
+        clear_cuda_cache()
+        print(
+            f"OOM_FALLBACK media_id={row.get('media_id') or row.get('id')} segment_seconds=30",
+            flush=True,
+        )
+        segments = split_wav(audio_path, Path(audio_path).parent, segment_seconds=30)
+        texts = []
+        language = "Chinese"
+        for segment in segments:
+            clear_cuda_cache()
+            segment_text, language = infer(model, [segment], context)[0]
+            if segment_text:
+                texts.append(segment_text)
+        clear_cuda_cache()
+        return row, ("\n".join(texts).strip(), language)
+
+
 def infer_with_oom_backoff(model, prepared, context):
+    if len(prepared) == 1:
+        row, audio_path = prepared[0]
+        return [infer_one_resilient(model, row, audio_path, context)]
     try:
         values = infer(model, [item[1] for item in prepared], context)
         return list(zip([item[0] for item in prepared], values))
     except RuntimeError as error:
-        if len(prepared) == 1 or "out of memory" not in str(error).lower():
+        if "out of memory" not in str(error).lower():
             raise
-        import torch
-        torch.cuda.empty_cache()
+        clear_cuda_cache()
         middle = len(prepared) // 2
         return (
             infer_with_oom_backoff(model, prepared[:middle], context)
@@ -197,6 +256,7 @@ def process_account(model, ffmpeg, account, details_dir, output_dir, batch_size,
                         "error": "",
                     }
             save_json(output_path, output)
+            clear_cuda_cache()
         done = sum(item.get("status") in ("complete", "no_speech") for item in output.values())
         print(f"CHECKPOINT {account} processed={min(offset + len(batch), len(pending))}/{len(pending)} total_done={done}", flush=True)
     print(f"DONE {account}", flush=True)
@@ -208,8 +268,8 @@ def main():
     parser.add_argument("--output-dir", default="work/xhs-qwen3-20260901/transcripts")
     parser.add_argument("--account", action="append", dest="accounts")
     parser.add_argument("--model", default=MODEL_ID)
-    parser.add_argument("--asr-batch-size", type=int, default=8)
-    parser.add_argument("--download-workers", type=int, default=4)
+    parser.add_argument("--asr-batch-size", type=int, default=1)
+    parser.add_argument("--download-workers", type=int, default=1)
     parser.add_argument("--domain-context", default=DOMAIN_CONTEXT)
     parser.add_argument("--media-id", default="")
     args = parser.parse_args()
