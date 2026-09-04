@@ -1,4 +1,4 @@
 interface:
   display_name: "video_media_search_skill"
-  short_description: "抓取小红书与 Instagram 内容并生成 Markdown 记录"
-  default_prompt: "Use $video-media-search-skill to collect the requested Xiaohongshu or Instagram content as Markdown records."
+  short_description: "增量抓取小红书与 Instagram 新内容并生成 Markdown"
+  default_prompt: "Use $video-media-search-skill to append newly published Xiaohongshu or Instagram content to the Markdown corpus."

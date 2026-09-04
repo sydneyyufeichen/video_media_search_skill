@@ -1,48 +1,26 @@
 ---
 name: video-media-search-skill
-description: Collect public Xiaohongshu and Instagram content and write auditable Markdown records. Use for video-media account backfills, topic searches, incremental updates, transcript completion, and legacy workbook conversion.
+description: Incrementally collect newly published public Xiaohongshu or Instagram content into auditable one-post-per-file Markdown. Use for routine additions to an existing corpus, not historical backfills or Excel conversion.
 ---
 
-# video_media_search_skill
+# Incremental video media collection
 
-Collect the configured accounts into a directory of standalone Markdown records. Markdown is the canonical deliverable; do not create or update an Excel workbook unless the user explicitly asks for Excel.
+Add only unseen public posts to `output/xiaohongshu/` or `output/instagram/`. Markdown is the canonical deliverable.
 
-## Required references
+## Run
 
-- Read [references/markdown-contract.md](references/markdown-contract.md) before writing output.
-- Read [references/incremental-workflow.md](references/incremental-workflow.md) before collecting platform data.
-- Read [references/platform-access.md](references/platform-access.md) for the requested platform. This skill contains its own access workflow and must not invoke or depend on `agent-reach`.
+1. Read [references/incremental-workflow.md](references/incremental-workflow.md).
+2. Read only the requested platform section in [references/platform-access.md](references/platform-access.md).
+3. Scan existing Markdown for canonical media IDs, then verify the live OpenCLI bridge and the user's existing Chrome login.
+4. Discover recent posts until they overlap the corpus. Filter known IDs before detail requests, downloads, or ASR.
+5. Fetch complete metadata for unseen posts. Transcribe unseen videos with `Qwen/Qwen3-ASR-1.7B`; never invent Script from Caption.
+6. Before export, read [references/markdown-contract.md](references/markdown-contract.md). Write one Markdown per new post and validate counts against the run manifest.
 
-## Workflow
+## Invariants
 
-1. For ordinary corpus collection, use `output/` as the corpus root and write only to `output/xiaohongshu/` or `output/instagram/`. Scan recursively and deduplicate by canonical media ID/URL. Never overwrite a different post because its title matches.
-2. Run `node scripts/verify-platform-access.mjs PLATFORM...` to verify the live OpenCLI browser bridge and existing login with read-only probes. Never log in for the user or read browser cookies.
-3. Collect the same fields used by the legacy workbook: Timestamp, Caption, Script, Likes, Comments, Shares or Views, Heat, Engagement when applicable, Duration, and URL. Include every public video in scope; do not silently omit inaccessible items.
-4. Complete the Script field before delivery. `【无可识别语音】` is valid only when transcription explicitly reports `no_speech`; do not fabricate a transcript from the caption.
-   For audio without a reusable transcript, run `Qwen/Qwen3-ASR-1.7B` once on the configured CUDA cloud worker and use that result as the final Script. Do not call `qwen3-asr-flash` for the current six-account backfill.
-5. Normalize records, calculate metrics with the rules in the Markdown contract, and write one `.md` per post. Name it `<account> - 点赞<likes> - <caption first line>.md`; use `点赞未知` only when the source omits the value.
-6. Run `python3 scripts/export-to-markdown.py validate output`. Reconcile per-account, platform, and total counts against the collected manifests before reporting completion.
-
-## Legacy Excel conversion
-
-Use the read-only converter; never modify the source workbook:
-
-`python3 scripts/export-to-markdown.py xlsx INPUT.xlsx output`
-
-The converter reads cached formula results, preserves every populated source field, and produces the canonical one-record-per-file layout.
-
-## Incremental JSON export
-
-After collection and transcription generate the normalized `rows.json`, then run:
-
-`python3 scripts/export-to-markdown.py rows RUN_DIR/rows.json output --existing-dir output`
-
-The exporter refuses duplicate canonical URLs and adds a stable numeric suffix when different posts have the same account/title filename.
-
-## Safety and failure rules
-
-- Keep cookies only in `.env`; keep generated cookie jars and raw captures in the run directory with mode `0600`. Never print, commit, or embed cookie values in output.
-- Keep `output/` retrieval-clean. Ordinary corpus runs may contain only the two platform directories and final `.md` records; put JSON, checkpoints, transcripts, logs, previews, and temporary files elsewhere.
-- Treat `400`, `401`, `429`, login redirects, captcha, “访问频繁”, missing overlap, incomplete manifests, and missing detail records as blockers. Retry once after confirming the Chrome session, then stop with the exact account and platform error.
-- Do not describe a partial corpus as “all content.” Resume from saved checkpoints after access is restored.
-- Preserve the user's existing corpus. Write new records atomically and do not delete or rewrite historical Markdown files unless explicitly requested.
+- Identity is canonical media ID/URL without query tokens; titles are not identifiers.
+- Keep raw captures, media, transcripts, checkpoints, and logs outside `output/`.
+- Never print or commit cookies/tokens, automate login, or perform platform write actions.
+- Stop on captcha, login failure, `401`, `403`, `429`, “访问频繁”, missing overlap, or incomplete details. Resume from checkpoints after access is restored.
+- Do not call `qwen3-asr-flash`. Accept `【无可识别语音】` only from an explicit `no_speech` result.
+- Do not rewrite an existing Markdown record during an incremental run unless the user explicitly requests a refresh.
