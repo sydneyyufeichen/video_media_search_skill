@@ -1,0 +1,19 @@
+# Irregular Period in Chinese Medicine #tcm #chinesemedicine #tcmbycheehee #health #womenshealth #menstrualcycle
+
+- Account: tcmbycheehee
+- Timestamp: 2025-12-02 15:49:43
+- Likes: 6347
+- Comments: 74
+- Views: 170377
+- Heat: 0.35037804112079407
+- Engagement: 0.03768701174454298
+- Duration: 165.9510040283203
+- URL: https://www.instagram.com/p/DRxEDz3kup1/
+
+## Caption
+
+Irregular Period in Chinese Medicine #tcm #chinesemedicine #tcmbycheehee #health #womenshealth #menstrualcycle
+
+## Script
+
+If your period is irregular, should you be concerned? The short answer is yes. Let me explain. Your menstrual cycle is like a monthly health report, and that's one of the luckiest things about being a woman. So when your period comes on time around the same length each month, it usually means that things are generally in balance. Now, for most people, a regular cycle means roughly around 28 to 31 days, bleeding for about 5 to 7 days. But for some people, they might have a shorter cycle for around 3 days, and that is normal for them. But if your cycle is all over the place, sometimes 25 days, sometimes 40 days, sometimes skipping a few months in a row, that is your body telling you that something isn't right. So in Chinese medicine, we say that a woman's health is rooted in the liver system. And the liver has three main functions. The first job is to regulate qi and emotions. The second job is to store blood. And the third job is make sure that everything is flowing regularly. So if you're constantly under a lot of stress, you're not sleeping well, you're not moving your body enough, or you do cold plunges or you drink a lot of cold drinks, these will all affect the qi flow and the regularity in your body. And over time, when that affects the liver system, this can show up as irregular periods. But in Chinese medicine, we don't just isolate it as one symptom, but we look at it as a whole pattern. So that means we look at something more than irregular periods. We look at other patterns like your energy levels, like whether you have sore breasts, whether you have a back pain. So we put all of these clues together, and we try to see what pattern your body is displaying. And then we use some personalized treatment like herbs and acupuncture to help target the problem. So that's very different from forcing your period to come or from disrupting your system to make sure that it follows a certain flow. So if you see a doctor, of course, I recommend seeing a doctor to take some blood tests to check for your hormones to make sure that you see what's actually going on. So they usually check for conditions like PCOS, they use ultrasound, and sometimes they might suggest the pill or some other hormonal treatments to help address your cycle. Now, these treatments can be helpful at times, but sometimes they might just be a cover over the warning light that your body is trying to tell you. So even though your cycle might be regular now, but some underlying problems still remain unfixed. And that's why more and more people now try to go for a more integrative approach. And that's why in China, a lot of hospitals are already using a integrative approach with both herbs and Western medicine to help the patient. So if your cycle has been irregular for a while, don't ignore it. And of course, if you haven't started tracking your period, please start. That will make our job a lot easier. And pay attention if your period is irregular for more than three months, if it's starting to feel painful, or if there's excessive bleeding, or if your period stops coming for more than three months. That is your sign to seek medical help, be it from a practitioner or from a gynecologist. So if this helped you see your cycle in a new way, make sure to share this with a friend who might need to know it and follow to learn more about Chinese medicine.
